@@ -1,4 +1,4 @@
-# Semantic Search Bot 🧠
+# Semantic Search Engine 🧠
 
 A **fully local, privacy-first "Chat with your PDFs"** application built as a single-file Streamlit app. It allows you to upload a PDF document, semantically search its content using vector embeddings, and optionally visualize the document embeddings in an interactive 3D scatter plot. 
 
