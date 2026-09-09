@@ -14,7 +14,7 @@ import plotly.express as px
 import fitz  # PyMuPDF
 
 # embeddings + index
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 import faiss
 from sklearn.decomposition import PCA
 
@@ -23,6 +23,10 @@ from sklearn.decomposition import PCA
 @st.cache_data(show_spinner=False)
 def load_model(model_name="all-MiniLM-L6-v2"):
     return SentenceTransformer(model_name)
+
+@st.cache_resource(show_spinner=False)
+def load_reranker(model_name="cross-encoder/ms-marco-MiniLM-L-6-v2"):
+    return CrossEncoder(model_name)
 
 def extract_text_from_pdf_bytes(pdf_bytes):
     # takes bytes (uploaded file) and returns large text
@@ -84,7 +88,17 @@ with st.sidebar:
 
     st.subheader("Search Parameters")
     st.markdown("Define how many top results to retrieve and which embedding model to use.")
-    top_k = st.number_input("Number of top results (k)", value=3, min_value=1, max_value=10, step=1, help="The number of most relevant chunks to retrieve for your query.")
+    
+    use_reranker = st.checkbox("Enable Reranking (Cross-Encoder)", value=False, help="Use a two-stage retrieval pipeline for higher accuracy.")
+    
+    if use_reranker:
+        top_k_initial = st.number_input("Initial top results (FAISS)", value=10, min_value=1, max_value=50, step=1)
+        top_k = st.number_input("Final top results (Reranked)", value=3, min_value=1, max_value=10, step=1)
+        reranker_name = st.selectbox("Reranker model", options=["cross-encoder/ms-marco-MiniLM-L-6-v2"], index=0)
+    else:
+        top_k = st.number_input("Number of top results (k)", value=3, min_value=1, max_value=10, step=1, help="The number of most relevant chunks to retrieve for your query.")
+        top_k_initial = top_k
+        
     model_name = st.selectbox("Embedding model", options=["all-MiniLM-L6-v2"], index=0, help="The model used to convert text into numerical embeddings.")
     
     st.markdown("---")
@@ -97,6 +111,10 @@ col1, col2 = st.columns([2, 1])
 # Model Loading
 with st.spinner("Loading embedding model..."):
     model = load_model(model_name)
+
+if use_reranker:
+    with st.spinner("Loading reranker model..."):
+        reranker = load_reranker(reranker_name)
 
 # Storage: we keep chunks, embeddings and FAISS index in session state
 if "chunks" not in st.session_state:
@@ -169,14 +187,44 @@ if ask_btn and query.strip() != "":
         st.error("No indexed PDF. Upload one first.")
     else:
         q_emb = safe_encode(model, [query])[0]
-        ids, distances = retrieve_top_k(st.session_state.index, q_emb, k=top_k)
+        ids, distances = retrieve_top_k(st.session_state.index, q_emb, k=top_k_initial)
         
         st.subheader("Top matches (raw chunks):")
-        for rank, (i, dist) in enumerate(zip(ids, distances), start=1):
-            score = 1.0 / (1.0 + float(dist))  # friendly pseudo-score, convert distance -> similarity-like
-            st.markdown(f"**Match {rank}** — _score approx_: **{score:.3f}**")
-            text_preview = st.session_state.chunks[i]
-            st.write(text_preview[:800] + ("..." if len(text_preview)>800 else ""))
+        
+        if use_reranker:
+            # Reranking Step
+            # 1. Fetch text chunks for retrieved ids
+            retrieved_chunks = [st.session_state.chunks[i] for i in ids]
+            
+            # 2. Form (query, chunk) pairs
+            pairs = [[query, chunk] for chunk in retrieved_chunks]
+            
+            # 3. Predict scores
+            with st.spinner("Reranking results..."):
+                cross_scores = reranker.predict(pairs)
+            
+            # 4. Sort by score in descending order
+            sorted_indices = np.argsort(cross_scores)[::-1]
+            
+            # 5. Keep top K final
+            final_ids = [ids[idx] for idx in sorted_indices[:top_k]]
+            final_scores = [cross_scores[idx] for idx in sorted_indices[:top_k]]
+            
+            for rank, (i, score) in enumerate(zip(final_ids, final_scores), start=1):
+                st.markdown(f"**Match {rank}** — _Reranker score_: **{score:.3f}**")
+                text_preview = st.session_state.chunks[i]
+                st.write(text_preview[:800] + ("..." if len(text_preview)>800 else ""))
+                
+            display_ids = final_ids
+            
+        else:
+            for rank, (i, dist) in enumerate(zip(ids, distances), start=1):
+                score = 1.0 / (1.0 + float(dist))  # friendly pseudo-score, convert distance -> similarity-like
+                st.markdown(f"**Match {rank}** — _score approx_: **{score:.3f}**")
+                text_preview = st.session_state.chunks[i]
+                st.write(text_preview[:800] + ("..." if len(text_preview)>800 else ""))
+                
+            display_ids = ids
 
         # Optional: show 3D plot with highlighted points
         if st.session_state.pca_points is not None:
@@ -189,7 +237,7 @@ if ask_btn and query.strip() != "":
                 "color": [0]*len(pts)
             }
             # highlight matched indices
-            for idx in ids:
+            for idx in display_ids:
                 df_plot["color"][idx] = 1
 
             fig = px.scatter_3d(df_plot, x='x', y='y', z='z', color=df_plot["color"],

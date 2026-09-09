@@ -7,6 +7,7 @@ Everything runs **entirely on your machine**, ensuring your data remains private
 ## Features ✨
 
 - **100% Local & Private**: No data leaves your machine. Uses `sentence-transformers` for local embeddings.
+- **Two-Stage Retrieval (Optional)**: Employs a **Retriever-Ranker architecture**. Quickly fetch initial results with FAISS (Bi-Encoder), then rerank them with a highly accurate Cross-Encoder (`ms-marco-MiniLM-L-6-v2`) for state-of-the-art semantic search accuracy.
 - **Configurable Search parameters**: Adjust text chunk size, chunk overlap, and the number of top-k results directly from the UI.
 - **Interactive 3D Visualization**: Displays a 3D scatter plot of your document's embeddings using PCA dimensionality reduction, highlighting the chunks that matched your query.
 - **Efficient Vector Search**: Uses FAISS (Facebook AI Similarity Search) for fast and scalable similarity matching.
@@ -14,8 +15,14 @@ Everything runs **entirely on your machine**, ensuring your data remains private
 
 ## Architecture 🏗️
 
+### Standard Retrieval
+```text
+PDF Upload → Text Extraction → Chunking → Embedding (Bi-Encoder) → FAISS Index → Semantic Search → 3D Visualization
 ```
-PDF Upload → Text Extraction → Chunking → Embedding → FAISS Index → Semantic Search → 3D Visualization
+
+### Two-Stage Retrieval (Reranking Enabled)
+```text
+PDF Upload → Text Extraction → Chunking → Embedding (Bi-Encoder) → FAISS Index → Fetch Initial Top-K → Rerank with Cross-Encoder → Return Final Top-K
 ```
 
 ## Prerequisites
@@ -64,7 +71,7 @@ The app will automatically open in your default web browser at `http://localhost
 ## How to Use 📖
 
 1. **Upload a PDF**: Use the sidebar to upload any PDF document you want to query.
-2. **Configure Settings**: Optionally tweak the *Chunking* and *Search* parameters in the sidebar to refine how the text is processed.
+2. **Configure Settings**: Optionally tweak the *Chunking* and *Search* parameters in the sidebar to refine how the text is processed. **Enable Reranking** for more accurate results using a Cross-Encoder.
 3. **Ask Questions**: In the main panel, type a question related to the uploaded PDF (e.g., *"What are the key findings?"* or *"Summarize the methodology"*).
 4. **View Matches**: Click **Search** to retrieve the most relevant text chunks along with a pseudo-similarity score.
 5. **Visualize**: Check out the interactive 3D plot to see how your document's text is distributed semantically, with your matching chunks highlighted in red!
